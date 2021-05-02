@@ -1,0 +1,136 @@
+---
+title: "HW2 BIOST540"
+author: "Meixin Zhang"
+date: "4/21/2021"
+output: word_document
+---
+## Part A
+```{r}
+rm(list=ls())
+library(reshape2)
+library(ggplot2)
+library(dplyr)
+library(nlme)
+cholesterol <- read.csv("~/Documents/MS-2nd-year/Spring/BIOST540/HW/cholesterol.csv")
+```
+
+## Question 1
+
+```{r}
+cholesterol<-cholesterol[,c("group","id","y1","y2","y3","y4","y5")]
+choles_long <- melt(cholesterol, id=c("id","group"))
+names(choles_long)<-c("id","group","time","value")
+choles_long$time <- as.numeric(gsub("y","",choles_long$time))
+choles_long$group[choles_long$group==1]<-"Treatment"
+choles_long$group[choles_long$group==2]<-"Control"
+choles_means <- aggregate(value ~ time + group, data = choles_long, FUN=mean)
+p <- ggplot(data = choles_means, aes(x = time, y = value, group = group, 
+                                    col = group))
+p + geom_line() + scale_color_manual(values=c('blue','red')) + 
+  geom_point() + theme_bw() + ylab("Serum cholesterol (mg/dL)") + xlab("Time points")
+```
+
+## summary statistics
+```{r}
+by(cholesterol[,-c(1,2)], INDICES = cholesterol$group, FUN=summary)
+```
+## Estimated correlation matrix after subtracting out means by group and month
+```{r}
+choles_mean <- cholesterol %>% group_by(group) %>% 
+  summarise(y0mean = mean(y1), y6mean=mean(y2), 
+            y12mean=mean(y3,na.rm = TRUE), y20mean=mean(y4,na.rm = TRUE),
+            y24mean=mean(y5,na.rm = TRUE)) 
+cholesterol <- merge(cholesterol, choles_mean, by="group")
+cholesterol$y0.resid <- cholesterol$y1 - cholesterol$y0mean
+cholesterol$y6.resid <- cholesterol$y2 - cholesterol$y6mean
+cholesterol$y12.resid <- cholesterol$y3 - cholesterol$y12mean
+cholesterol$y20.resid <- cholesterol$y4 - cholesterol$y20mean
+cholesterol$y24.resid <- cholesterol$y5 - cholesterol$y24mean
+choles_complete<-cholesterol[rowSums(is.na(cholesterol))==0,]
+cor(choles_complete[,c("y0.resid", "y6.resid", "y12.resid", "y20.resid","y24.resid")])
+```
+
+## Estimated correlation matrix by treatment groups
+```{r}
+by(choles_complete[,c("y0.resid", "y6.resid", "y12.resid", "y20.resid", "y24.resid")], 
+   INDICES = choles_complete$group, FUN=cor)
+```
+
+## Question 3
+```{r}
+m.reml<-gls(value~group*as.factor(time),
+            data=choles_long[rowSums(is.na(choles_long))==0,],
+            method="REML",
+            correlation=corSymm(form = ~time | id),
+            weights=varIdent(form= ~1 | time))
+summary(m.reml)
+anova(m.reml)
+```
+
+## Question 4
+```{r}
+choles_long$month[choles_long$time==1]<-0
+choles_long$month[choles_long$time==2]<-6
+choles_long$month[choles_long$time==3]<-12
+choles_long$month[choles_long$time==4]<-20
+choles_long$month[choles_long$time==5]<-24
+m.reml2<-gls(value~group*month,
+             data=choles_long[rowSums(is.na(choles_long))==0,],
+             method="REML",
+             correlation=corSymm(form = ~time | id),
+             weights=varIdent(form= ~1 | month))
+summary(m.reml2)
+```
+
+## Part B
+```{r}
+data(Orthodont)
+Orthodont$id<-cumsum(!duplicated(Orthodont$Subject))
+```
+
+## Question 2
+## OLS
+```{r}
+lm<-lm(distance ~ as.factor(age)*Sex, 
+            data = Orthodont)
+summary(lm)
+```
+
+## GLS, unstructured/symmetric correlation matrix, heteroscedasticity, REML 
+```{r}
+Orthodont$time<-ifelse(Orthodont$age==8,1,
+                       ifelse(Orthodont$age==10,2,
+                              ifelse(Orthodont$age==12,3,4)))
+reml_2<-gls(distance ~ Sex*as.factor(age),
+            data = Orthodont,
+            method = "REML",
+            correlation = corSymm(form = ~time | Subject),
+            weights = varIdent(form = ~1 | as.factor(age)))
+summary(reml_2)
+```
+
+## GLS, exchangeable/compound symmetric correlation matrix, homoscedasticity, REML 
+```{r}
+reml_3<-gls(distance ~ Sex*as.factor(age), 
+              data=Orthodont, 
+              method="REML",
+              correlation=corCompSymm(form = ~time | id))
+summary(reml_3)
+```
+
+## LMM, random intercepts, REML 
+```{r}
+lmm1 <- lme( distance ~ Sex*as.factor(age), 
+             method = "REML", data = Orthodont, 
+             random = reStruct( ~ 1 | id, pdClass="pdDiag", REML=F))
+summary(lmm1)
+```
+
+## LMM, random intercepts + slopes (correlated), REML
+```{r}
+lmm2 <- lme( distance ~ Sex*as.factor(age), 
+             method = "REML", data = Orthodont, 
+             random = reStruct( ~ 1 + age | id, pdClass="pdSymm", REML=F))
+summary(lmm2)
+```
+

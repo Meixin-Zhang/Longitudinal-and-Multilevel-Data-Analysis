@@ -1,0 +1,149 @@
+---
+title: "HW1 Biost 540"
+author: "Meixin Zhang"
+date: "4/8/2021"
+output:
+  word_document: default
+  pdf_document: default
+  html_document:
+    df_print: paged
+---
+
+```{r}
+# part A
+install.packages("reshape2")
+library(reshape2)
+install.packages(ggplot2)
+library(ggplot2)
+install.packages("joineR")
+library(joineR)
+aug <- read.csv("~/Documents/MS-2nd-year/Spring/BIOST540/HW/augmentation.csv")
+aug <- aug[, c("id", "Treatment_Group", "HD_t0", "HD_t1", "HD_t2",
+               "HD_t3", "HD_t4", "HD_t5", "HD_t6")]
+aug_long <- melt(aug, id=c("id","Treatment_Group"))
+aug_long$week <- as.numeric(gsub("HD_t","",aug_long$variable))
+```
+
+
+```{r}
+# Question 1
+plot(aug_long$week, aug_long$value,
+     col=ifelse(aug_long$Treatment_Group=="Control","red","blue"),
+     xlab = "Week", ylab = "HDRS",pch=20)
+legend("topright", c("Control", "Augmentation"), col=c("red", "blue"),
+       pch=20, ncol=2)
+
+aug_means <- aggregate(value ~ week + Treatment_Group, data = aug_long, FUN=mean)
+p <- ggplot(data = aug_means, aes(x = week, y = value, group = Treatment_Group, 
+                                    col = Treatment_Group))
+p + geom_line() + scale_color_manual(values=c('blue','red')) + 
+  geom_point() + theme_bw() + ylab("HDRS") + xlab("Time (week)")
+
+# Question 2
+aug_wide<-aug
+aug<-aug_long[order(aug_long$id),]
+matplot(t(matrix(aug$week,ncol=7,byrow=T)), 
+        t(aug_wide[,3:9]), type="l", lty=1,
+        xlab="Time (week)", ylab="HDRS",
+        col=ifelse(aug_wide$Treatment_Group=="Control", "blue", "red"))
+legend("topright", c("Control", "Augmentation"), col=c("blue", "red"),
+       lty=1, ncol=2)
+
+matplot(t(matrix(aug$week,ncol=7,byrow=T)), 
+        t(aug_wide[,3:9] - aug_wide$HD_t0), 
+        type="l", xlab="Time (week)", ylab="Difference from baseline",lty=1,
+        col=ifelse(aug_wide$Treatment_Group=="Control", "blue", "red"))
+legend("bottomleft", c("Control", "Augmentation"), col=c("blue", "red"),
+       lty=1, ncol=2)
+
+# Question 3
+# Overall
+model_overall <- lm(value ~ week, data=aug)
+aug_complete_long<-aug[rowSums(is.na(aug))==0,]
+aug_complete_long$residual <- model_overall$residuals
+
+# Variogram
+aug2<-merge(aug, aug_complete_long, by=c("id","Treatment_Group","variable","value","week"),all = TRUE)
+vgm <- variogram(aug2$id, aug2$week, aug2$residual)
+plot(vgm, bdw=5,ylim=c(0, 100)) # but cannot get the semi variogram line
+
+# autocorrelation function
+aug2 <- data.frame(aug_complete_long)
+aug_wide2 <- reshape(aug2[, c("week","id","residual")],
+                           direction="wide", 
+                           idvar = c("id"),
+                           timevar="week")
+pairs(aug_wide2[,2:8], upper.panel = NULL, diag.panel = NULL)
+mat <- cor(aug_wide2[,2:8])
+mat[upper.tri(mat)] <- NA
+diag(mat) <- sqrt(diag(cov(aug_wide2[,2:8])))
+round(mat,) # because of "NAs" cannot get estimated correlation
+# control group
+aug_control <- aug_wide2[aug_wide2$id<27,]
+pairs(aug_control[,2:8], upper.panel = NULL, diag.panel = NULL)
+# treatment group
+aug_aug <- aug_wide2[aug_wide2$id>26,]
+pairs(aug_aug[,2:8], upper.panel = NULL, diag.panel = NULL)
+
+# Question 4
+# When does it occur and How much is missing in each group? 
+table(aug[is.na(aug$value),]$week) #overall
+table(aug[aug$Treatment_Group=="Control"& is.na(aug$value),]$week) #control group
+table(aug[aug$Treatment_Group=="Augmentation"& is.na(aug$value),]$week)
+# what does the baseline HDRS look like (as compared to subjects with complete observations)
+aug_na<-aug_wide[rowSums(is.na(aug_wide))>0,]
+summary(aug_na$HD_t0)
+aug_complete<-aug_wide[rowSums(is.na(aug_wide))==0,]
+summary(aug_complete$HD_t0)
+
+# end of part A
+matplot(t(matrix(aug2$week,ncol=50, byrow=T)), 
+        t(matrix(aug2$residual, ncol=50, byrow=T)), 
+        type="l", 
+        col=ifelse(aug2$Treatment_Group=="Control","blue","red"),
+        lty=ifelse(aug2$Treatment_Group=="Control",2,1),
+        xlab="week", ylab="Residuals", lwd=1.5)
+## Part B
+library(nlme)
+data(Orthodont)
+# Question1
+summary(Orthodont[Orthodont$Sex=="Male"&Orthodont$age==8,]$distance)
+summary(Orthodont[Orthodont$Sex=="Female"&Orthodont$age==8,]$distance)
+summary(Orthodont[Orthodont$Sex=="Male"&Orthodont$age==14,]$distance)
+summary(Orthodont[Orthodont$Sex=="Female"&Orthodont$age==14,]$distance)
+
+# Question 2
+slopes <- by(Orthodont, INDICES = Orthodont$Subject, 
+             FUN = function(data.set){
+               lm(distance ~ age, data = data.set)$coef[2]})
+dat.slopes <- data.frame("Subject" = names(slopes),
+                         "slope" = as.numeric(slopes))
+summary(dat.slopes$slope)
+
+# Question 3
+dat.summary <- aggregate(distance ~ age + Subject + Sex, 
+                         data = Orthodont, FUN = mean)
+dat.summary <- merge(dat.slopes, dat.summary, by = "Subject")
+boxplot(slope ~ Sex, data = dat.summary)
+
+#Question 4
+t.test(slope ~ Sex, data = dat.summary)
+0.7843750 - 0.4795455 
+
+# Question 5
+ortho_wide <- reshape(Orthodont, 
+                      direction="wide", 
+                      idvar = c("Subject", "Sex"),
+                      timevar="age")
+ortho_wide$dis_change<-ortho_wide$distance.14-ortho_wide$distance.8
+orth.post<-lm(distance.14~Sex, data = ortho_wide)
+summary(ortho.post)
+orth.change<-lm(dis_change~Sex, data = ortho_wide)
+summary(orth.change)
+orth.ancova<-lm(distance.14~Sex+distance.8, data = ortho_wide)
+summary(orth.ancova)
+c(orth.post$coefficients[2], 
+  orth.change$coefficients[2],
+  orth.ancova$coefficients[2])
+```
+
